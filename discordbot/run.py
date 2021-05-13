@@ -12,7 +12,7 @@ import corona
 from bs4 import BeautifulSoup
 from discord.ext import commands, tasks
 from requests.sessions import Request
-token = "ODIzODIzMjc1MzUxOTk4NTI0.YFmbNg.it177D-KZ5YGqTEX2fGoFL6QBmA"
+token = ""
 client = discord.Client()
 @client.event
 async def on_ready():
