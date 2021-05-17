@@ -12,1539 +12,1898 @@ import corona
 from bs4 import BeautifulSoup
 from discord.ext import commands, tasks
 from requests.sessions import Request
-token = ""
-client = discord.Client()
+from discord.ext.commands.core import command
+import hangang
+
+token = "ODIzODIzMjc1MzUxOTk4NTI0.YFmbNg.pNTzTpOaCiJPtAjXP3VR8DNbBdA"
+
+client = commands.Bot(command_prefix='.')
+
+# 유저 소지금 및 코인
+userMoney = {}
+userCoin = {}
+
+# 블랙잭
+cardDeck = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+TableCard = {}
+isBust = {}  # 해당 유저가 버스트인지를 감지함
+isStand = {}  # 해당 유저가 스탠드인지를 감지함
+isDouble = {}  # 해당 유저가 더블인지를 감지함
+blackJackUser = []  # 플레이 유저를 넣는다.
+blackJackCount = 0
+DealerCard = []  # 딜러(봇)의 패
+blackJackGet = []  # 돈 따는 사람 리스트
+
+
 @client.event
 async def on_ready():
-    await client.change_presence(activity=discord.Game(name='help;'))
-    print("시작!")
+    await client.change_presence(activity=discord.Game(name='.도움말'))
+    print("Doking")
 
-@client.event
-async def on_message(msg):
-    author = msg.author
-    send = msg.channel.send
-    content = msg.content
 
-    if (author == client.user):
-        pass
+@client.command()
+async def testImg(ctx):
+    e = discord.Embed()
+    e.set_image(url="https://www.codingfactory.net/wp-content/uploads/abc.jpg")
+    await ctx.send(embed=e)
 
-    if (content.startswith("help;")):
-        embed = discord.Embed(
-            title="봇 사용법",
-            colour=0x62c1cc
-        )
-        embed.add_field(name="help;", value="도움말을 표시합니다", inline=False)
-        embed.add_field(name="corona;", value="누적 확진자 수, 일일확진자 수를 확인합니다.", inline=False)
-        embed.add_field(name="dice;", value="주사위를 굴립니다.", inline=False)
-        embed.add_field(name="lolrd;", value="포지션에 상관없이 롤 랜덤 캐릭터를 추천 해줍니다.", inline=False)
-        embed.add_field(name="rainrd;", value="레인보우식스시즈 랜덤 캐릭터를 추천 해줍니다.", inline=False)
-        embed.add_field(name="bsrd;", value="블랙서바이벌 랜덤 캐릭터를 추천 해줍니다.", inline=False)
-        await send(embed=embed)
+
+@client.command(pass_content=True,name="블랙잭")
+async def blackJack(ctx, money, *userName: discord.Member):
+    global blackJackCount
+    if userName in TableCard:
+        await ctx.send("아직 게임이 종료되지않았습니다!")
+        return
+    money = int(money)
+    if (money < 100):
+        await ctx.send("배팅금이 100이하입니다.")
+        return
+    blackJackCount = 0
+    await ctx.send("배팅금은 " + str(money) + "입니다.")
+    await ctx.send("블랙잭은 카드숫자 합이 21에 가까워야합니다 21을 넘어가면 패배하게되며 딜러의 카드 합보다 적다면 패배하게됩니다.J,Q,K는 처음에는 10으로 계산됩니다.")
+    dr1 = random.choice(cardDeck)
+    dr2 = random.choice(cardDeck)
+    DealerCard.append(dr1)
+    DealerCard.append(dr2)
+
+    if dr1 == 1:
+        dr1 = "A"
+    if dr1 == 11:
+        dr1 = "J"
+    if dr1 == 12:
+        dr1 = "Q"
+    if dr1 == 13:
+        dr1 = "K"
+
+    await ctx.send("딜러의 보여진 카드는 " + str(dr1) + "입니다.")
+    for i in userName:
+        r1 = random.choice(cardDeck)
+        r2 = random.choice(cardDeck)
+        TableCard[i] = [r1, r2]
+
+        if r1 == 1:
+            r1 = "A"
+        if r1 == 11:
+            r1 = "J"
+        if r1 == 12:
+            r1 = "Q"
+        if r1 == 13:
+            r1 = "K"
+
+        if r2 == 1:
+            r2 = "A"
+        if r2 == 11:
+            r2 = "J"
+        if r2 == 12:
+            r2 = "Q"
+        if r2 == 13:
+            r2 = "K"
+
+        await ctx.send(str(i) + "님의 카드는 " + str(r1) + ", " + str(r2))
+        isBust[i] = False
+        isStand[i] = False
+        isDouble[i] = False
+        blackJackUser.append(i)
+
+
+@blackJack.error
+async def blackJack_error(ctx, error):
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("배팅금 혹은 플레이어가 미지정상태입니다!")
+    if isinstance(error, commands.BadArgument):
+        await ctx.send("배팅금 혹은 플레이어의 형태가 올바르지 못합니다!")
+
+
+@client.command(pass_content=True,name="히트")
+async def hit(ctx, *, user: discord.Member):
+    if user != ctx.author:
+        await ctx.send("당신은 " + str(user) + "님이 아니십니다.")
+        return
+    global blackJackCount
+    try:
+        if isStand[user] or isDouble[user] == True:
+            await ctx.send(str(user) + "님께서는 이미 선택을 마쳤습니다.")
+            return
+        elif isBust[user] == True:
+            await ctx.send(str(user) + "님께서는 버스트 상태입니다.")
+            return
+        nextCard = random.choice(cardDeck)
+        TableCard[user].append(nextCard)
+
+        sum = 0
+        for i in TableCard[user]:
+            if i == 11:
+                i = 10
+            elif i == 12:
+                i = 10
+            elif i == 13:
+                i = 10
+            sum += i
+
+        if nextCard == 1:
+            nextCard = "A"
+        if nextCard == 11:
+            nextCard = "J"
+        if nextCard == 12:
+            nextCard = "Q"
+        if nextCard == 13:
+            nextCard = "K"
+
+        await ctx.send(str(user) + "님이 히트를 요청하여 준 카드 :" + str(nextCard))
+
+        if (sum > 21):
+            await ctx.send(str(user) + "님께서 버스트 하셨습니다.")
+            isBust[user] = True
+            blackJackCount += 1
+    except KeyError as e:
+        await ctx.send("게임 참가자가 아닙니다.")
+
+
+@hit.error
+async def hit_error(ctx, error):
+    if isinstance(error, commands.CommandInvokeError):
+        await ctx.send("게임 참가자가 아닙니다.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("배팅금 혹은 플레이어가 미지정상태입니다!")
+
+
+@client.command(name="스탠드", aliases=['스텐드'])
+async def stand(ctx, *, user: discord.Member):
+    global blackJackCount
+    try:
+        if isStand[user] == True:
+            await ctx.send(str(user) + "님께서는 이미 선택을 마쳤습니다.")
+            return
+        elif isBust[user] == True:
+            await ctx.send(str(user) + "님께서는 버스트 상태입니다.")
+            return
+        await ctx.send(str(user) + "님이 스텐드를 하셨습니다.")
+        isStand[user] = True
+        blackJackCount += 1
+    except KeyError:
+        await ctx.send("게임 참가자가 아닙니다.")
+
+
+@stand.error
+async def stand_error(ctx, error):
+    if isinstance(error, commands.CommandInvokeError):
+        await ctx.send("게임 참가자가 아닙니다.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("배팅금 혹은 플레이어가 미지정상태입니다!")
+
+
+@client.command(name="더블")
+async def double(ctx, *, user: discord.Member):
+    global blackJackCount
+    try:
+        if isStand[user] or isDouble[user] == True:
+            await ctx.send(str(user) + "님께서는 이미 선택을 마쳤습니다.")
+            return
+        elif isBust[user] == True:
+            await ctx.send(str(user) + "님께서는 버스트 상태입니다.")
+            return
+        nextCard = random.choice(cardDeck)
+        TableCard[user].append(nextCard)
+
+        sum = 0
+        for i in TableCard[user]:
+            if i == 11:
+                i = 10
+            elif i == 12:
+                i = 10
+            elif i == 13:
+                i = 10
+            sum += i
+
+        if nextCard == 1:
+            nextCard = "A"
+        if nextCard == 11:
+            nextCard = "J"
+        if nextCard == 12:
+            nextCard = "Q"
+        if nextCard == 13:
+            nextCard = "K"
+
+        await ctx.send(str(user) + "님이 더블을 요청하여 준 카드 :" + str(nextCard))
+
+        if (sum > 21):
+            await ctx.send(str(user) + "님께서 버스트 하셨습니다.")
+            isBust[user] = True
+            blackJackCount += 1
+
+        await ctx.send(str(user) + "님이 더블을 선택하셨습니다.")
+        isDouble[user] = True
+    except KeyError:
+        await ctx.send("게임 참가자가 아닙니다.")
+
+
+@double.error
+async def double_error(ctx, error):
+    if isinstance(error, commands.CommandInvokeError):
+        await ctx.send("게임 참가자가 아닙니다.")
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("배팅금 혹은 플레이어가 미지정상태입니다!")
+
+
+@client.command(name="끝내기", aliases=['결과'])
+async def blackJackEnd(ctx):
+    global blackJackCount
+    if blackJackCount < len(blackJackUser):
+        await ctx.send("아직 모든 인원이 버스트 혹은 스탠드 상태가 아닙니다!")
+        return
+    sum = 0
+
+    dGui1 = DealerCard[0]
+    dGui2 = DealerCard[1]
+
+    if dGui1 == 1:
+        dGui1 = "A"
+    if dGui1 == 11:
+        dGui1 = "J"
+    if dGui1 == 12:
+        dGui1 = "Q"
+    if dGui1 == 13:
+        dGui1 = "K"
+
+    if dGui2 == 1:
+        dGui2 = "A"
+    if dGui2 == 11:
+        dGui2 = "J"
+    if dGui2 == 12:
+        dGui2 = "Q"
+    if dGui2 == 13:
+        dGui2 = "K"
+
+    await ctx.send("딜러의 패는" + str(dGui1) + ", " + str(dGui2) + "입니다")
+    if DealerCard[0] == 11:
+        DealerCard[0] = 10
+    if DealerCard[0] == 12:
+        DealerCard[0] = 10
+    if DealerCard[0] == 13:
+        DealerCard[0] = 10
+
+    if DealerCard[1] == 11:
+        DealerCard[1] = 10
+    if DealerCard[1] == 12:
+        DealerCard[1] = 10
+    if DealerCard[1] == 13:
+        DealerCard[1] = 10
+    sum = DealerCard[0] + DealerCard[1]
+
+    while sum < 17 :
+        dr1 = random.choice(cardDeck)
+
+        dgui = dr1
+        if dgui == 1:
+            dgui = "A"
+        if dgui == 11:
+            dgui = "J"
+        if dgui == 12:
+            dgui = "Q"
+        if dgui == 13:
+            dgui = "K"
+
+        await ctx.send("딜러의 총합이 17미만이기에 뽑은 카드 : " + str(dgui))
+        if (dr1 == 11):
+            dr1 = 10
+        if (dr1 == 12):
+            dr1 = 10
+        if (dr1 == 13):
+            dr1 = 10    
+        sum += dr1
+
+    player = 0
+    for i in range(len(blackJackUser)):
+        for j in TableCard[blackJackUser[i]]:
+            if j == 11:
+                j = 10
+            if j == 12:
+                j = 10
+            if j == 13:
+                j = 10
+            player += j
+        for j in TableCard[blackJackUser[i]]:
+            if j == 1:
+                if player >= 12:
+                    player += 10
+        if (sum < player and player <= 21):
+            blackJackGet.append(blackJackUser[i].name)
+        elif (sum > 21 and player <= 21):
+            blackJackGet.append(blackJackUser[i].name)
+        player = 0
+
+    if (sum > 21):
+        await ctx.send("딜러 버스트")
+        await ctx.send("돈을 딴 플레이어" + str(blackJackGet))
     
-    #코로나 확진자 크롤링
-    if(content.startswith("corona;")):
-        crawler = corona.krapoi()
-        crawler.requestRun()
-        r = crawler.requestReturn()
-        embed = discord.Embed(
+    elif (sum == 21):
+        await ctx.send("딜러 21!")
+        await ctx.send("모든 돈은 딜러에게로 넘어갑니다.")
+
+    else:
+        await ctx.send("딜러 " + str(sum))
+        await ctx.send("딜러보다 높고 버스트가 아닌 모든 사람에게 배팅금의 2배를 드립니다.")
+        await ctx.send("돈을 딴 플레이어" + str(blackJackGet))
+    
+    blackJackUser.clear()
+    isBust.clear()
+    isStand.clear()
+    isDouble.clear()
+    TableCard.clear()
+    blackJackGet.clear()
+    blackJackCount = 0
+    DealerCard.clear()
+
+
+
+
+
+@client.command(name="도움말")
+async def helpkp(ctx):
+    embed = discord.Embed(
+        title="봇 사용법",
+        colour=0x62c1cc
+    )
+    embed.add_field(name=".도움말", value="도움말을 표시합니다", inline=False)
+    embed.add_field(name=".코로나", value="누적 확진자 수, 일일확진자 수를 확인합니다.", inline=False)
+    embed.add_field(name=".주사위", value="주사위를 굴립니다.", inline=False)
+    embed.add_field(name=".롤랜덤", value="포지션에 상관없이 롤 랜덤 캐릭터를 추천 해줍니다.", inline=False)
+    embed.add_field(name=".레식랜덤", value="레인보우식스시즈 랜덤 캐릭터를 추천 해줍니다.", inline=False)
+    embed.add_field(name=".블서랜덤", value="블랙서바이벌 랜덤 캐릭터를 추천 해줍니다.", inline=False)
+    embed.add_field(name=".한강", value="현재 한강의 온도를 알려줍니다.\n", inline=False)
+    #블랙잭 명령어
+    embed.add_field(name="블랙잭", value="블랙잭에 관한 명령어들", inline=False)
+    embed.add_field(name=".블랙잭", value="블랙잭을 시작합니다.\n 블랙잭 배팅금 @맨션 으로 플레이어를 참여시킵니다.\n(ex .블랙잭 100 @krapoi)", inline=True)
+    embed.add_field(name=".히트", value="카드를 한장 더 받습니다.\n(ex .히트 @krapoi)", inline=True)
+    embed.add_field(name=".더블", value="더이상 카드를 더 받을 수 없으며 판돈을 두배로 땁니다.\n(ex .더블 @krapoi)", inline=True)
+    embed.add_field(name=".스텐드", value="자신의 카드에서 멈춥니다.\n(ex .스텐드 @krapoi)", inline=True)
+    embed.add_field(name=".끝내기", value="모두 버스트 하거나 스텐드를 한다면 딜러의 패를 보여주며 끝냅니다.\n(ex .끝내기)", inline=True)
+    await ctx.send(embed=embed)
+
+    # 코로나 확진자 크롤링
+
+
+@client.command(name="코로나")
+async def _corona(ctx):
+    crawler = corona.krapoi()
+    crawler.requestRun()
+    r = crawler.requestReturn()
+    embed = discord.Embed(
             title="확진자수",
             colour=0x62c1cc
-            )
-        embed.add_field(name="총 확진자수",value=r['today_domestic']+r['today_overseas'],inline=False)
-        embed.add_field(name="국내 확진자수",value=r['today_domestic'],inline=False)  
-        embed.add_field(name="해외유입 확진자수",value=r['today_overseas'],inline=False)  
-        embed.add_field(name="누적 확진자수",value=r['accumulate_confirmed'],inline=False)  
-        await send(embed=embed)
+       )
+    embed.add_field(
+        name="총 확진자수", value=r['today_domestic']+r['today_overseas'], inline=False)
+    embed.add_field(name="국내 확진자수", value=r['today_domestic'], inline=False)
+    embed.add_field(name="해외유입 확진자수", value=r['today_overseas'], inline=False)
+    embed.add_field(
+        name="누적 확진자수", value=r['accumulate_confirmed'], inline=False)
+    await ctx.send(embed=embed)
 
-    #주사위 굴리기
-    if(content.startswith("dice;")):
-        randnum = random.randint(1, 6)  # 1이상 6이하 랜덤 숫자를 뽑음
+    # 주사위 굴리기
+
+
+@client.command(name="주사위")
+async def dice(ctx):
+    send = ctx.send
+
+    randnum = random.randint(1, 6)  # 1이상 6이하 랜덤 숫자를 뽑음
+    embed = discord.Embed(
+        title="주사위",
+        colour=0x62c1cc
+    )
+    embed.add_field(name=f'주사위 결과 입니다.', value=f'{randnum}',  inline=False)
+    await send(embed=embed)
+
+    # 롤 랜덤캐 노가다.
+
+
+@client.command(name="롤랜덤")
+async def lolrd(ctx):
+    send = ctx.send
+    rd = random.randint(1, 155)
+    if(rd == 1):
+            embed = discord.Embed(
+                title="롤 랜덤캐",
+                colour=0xc1cc
+            )
+            embed.add_field(name="추천", value="가렌")
+            embed.set_image(
+                url="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Garen_0.jpg")
+            await send(embed=embed)
+    elif(rd == 2):
         embed = discord.Embed(
-            title="주사위",
-            colour=0x62c1cc
+            title="롤 랜덤캐",
+            colour=0xc1cc
         )
-        embed.add_field(name=f'주사위 결과 입니다.',value=f'{randnum}',  inline=False)
+        embed.add_field(name="추천", value="갈리오")
+        embed.set_image(
+            url="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Galio_0.jpg")
         await send(embed=embed)
+    elif(rd == 3):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="갱플랭크")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gangplank_0.jpg")
+        await send(embed=embed)
+    elif(rd == 4):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="그라가스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gragas_0.jpg")
+        await send(embed=embed)
+    elif(rd == 5):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="그레이브즈")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Graves_0.jpg")
+        await send(embed=embed)
+    elif(rd == 6):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="그웬")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gwen_0.jpg")
+        await send(embed=embed)
+    elif(rd == 7):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="나르")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gnar_0.jpg")
+        await send(embed=embed)
+    elif(rd == 8):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="나미")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nami_0.jpg")
+        await send(embed=embed)
+    elif(rd == 9):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="나서스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nasus_0.jpg")
+        await send(embed=embed)
+    elif(rd == 10):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="노틸러스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nautilus_0.jpg")
+        await send(embed=embed)
+    elif(rd == 11):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="녹턴")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nocturne_0.jpg")
+        await send(embed=embed)
+    elif(rd == 12):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="누누와 윌럼프")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nunu_0.jpg")
+        await send(embed=embed)
+    elif(rd == 13):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="니달리")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nidalee_0.jpg")
+        await send(embed=embed)
+    elif(rd == 14):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="니코")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Neeko_0.jpg")
+        await send(embed=embed)
+    elif(rd == 15):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="다리우스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Darius_0.jpg")
+        await send(embed=embed)
+    elif(rd == 16):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="다이애나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Diana_0.jpg")
+        await send(embed=embed)
+    elif(rd == 17):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="드레이븐")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Draven_0.jpg")
+        await send(embed=embed)
+    elif(rd == 18):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="라이즈")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ryze_0.jpg")
+        await send(embed=embed)
+    elif(rd == 19):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="라칸")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rakan_0.jpg")
+        await send(embed=embed)
+    elif(rd == 20):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="람머스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rammus_0.jpg")
+        await send(embed=embed)
+    elif(rd == 21):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="럭스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lux_0.jpg")
+        await send(embed=embed)
+    elif(rd == 22):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="럼블")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rumble_0.jpg")
+        await send(embed=embed)
+    elif(rd == 23):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="레넥톤")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Renekton_0.jpg")
+        await send(embed=embed)
+    elif(rd == 24):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="레오나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Leona_0.jpg")
+        await send(embed=embed)
+    elif(rd == 25):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="렉사이")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/RekSai_0.jpg")
+        await send(embed=embed)
+    elif(rd == 26):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="렐")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rell_0.jpg")
+        await send(embed=embed)    
+    elif(rd == 27):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="렝가")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rengar_0.jpg")
+        await send(embed=embed)
+    elif(rd == 28):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="루시안")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lucian_0.jpg")
+        await send(embed=embed)
+    elif(rd == 29):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="룰루")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lulu_0.jpg")
+        await send(embed=embed)
+    elif(rd == 30):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="르블랑")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Leblanc_0.jpg")
+        await send(embed=embed)
+    elif(rd == 31):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="리신")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_0.jpg")
+        await send(embed=embed)
+    elif(rd == 32):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="리븐")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Riven_0.jpg")
+        await send(embed=embed)
+    elif(rd == 33):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="리산드라")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lissandra_0.jpg")
+        await send(embed=embed)
+    elif(rd == 34):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="릴리아")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lillia_0.jpg")
+        await send(embed=embed)
+    elif(rd == 35):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="마스터 이")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MasterYi_0.jpg")
+        await send(embed=embed)
+    elif(rd == 36):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="마오카이")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Maokai_0.jpg")
+        await send(embed=embed)
+    elif(rd == 37):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="말자하")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Malzahar_0.jpg")
+        await send(embed=embed)
+    elif(rd == 38):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="말파이트")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Malphite_0.jpg")
+        await send(embed=embed)
+    elif(rd == 39):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="모데카이저")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Mordekaiser_0.jpg")
+        await send(embed=embed)
+    elif(rd == 40):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="모르가나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Morgana_0.jpg")
+        await send(embed=embed)
+    elif(rd == 41):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="문도 박사")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/DrMundo_0.jpg")
+        await send(embed=embed)
+    elif(rd == 42):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="미스 포츈")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MissFortune_0.jpg")
+        await send(embed=embed)
+    elif(rd == 43):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="바드")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Bard_0.jpg")
+        await send(embed=embed)
+    elif(rd == 44):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="바루스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Varus_0.jpg")
+        await send(embed=embed)
+    elif(rd == 45):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="바이")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vi_0.jpg")
+        await send(embed=embed)
+    elif(rd == 46):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="베이가")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Veigar_0.jpg")
+        await send(embed=embed)
+    elif(rd == 47):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="베인")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vayne_0.jpg")
+        await send(embed=embed)
+    elif(rd == 48):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="벨코즈")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Velkoz_0.jpg")
+        await send(embed=embed)
+    elif(rd == 49):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="볼리베어")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Volibear_0.jpg")
+        await send(embed=embed)
+    elif(rd == 50):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="브라움")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Braum_0.jpg")
+        await send(embed=embed)
+    elif(rd == 51):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="브랜드")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Brand_0.jpg")
+        await send(embed=embed)
+    elif(rd == 52):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="블라디미르")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vladimir_0.jpg")
+        await send(embed=embed)
+    elif(rd == 53):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="블리츠크랭크")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Blitzcrank_0.jpg")
+        await send(embed=embed)
+    elif(rd == 54):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="비에고")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Viego_0.jpg")
+        await send(embed=embed)
+    elif(rd == 55):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="빅토르")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Viktor_0.jpg")
+        await send(embed=embed)
+    elif(rd == 56):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="뽀삐")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Poppy_0.jpg")
+        await send(embed=embed)
+    elif(rd == 57):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="사미라")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Samira_0.jpg")
+        await send(embed=embed)
+    elif(rd == 58):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="사이온")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sion_0.jpg")
+        await send(embed=embed)
+    elif(rd == 59):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="사일러스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sylas_0.jpg")
+        await send(embed=embed)
+    elif(rd == 60):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="샤코")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Shaco_0.jpg")
+        await send(embed=embed)
+    elif(rd == 61):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="세나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Senna_0.jpg")
+        await send(embed=embed)
+    elif(rd == 62):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="세라핀")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Seraphine_0.jpg")
+        await send(embed=embed)
+    elif(rd == 63):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="세주아니")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sejuani_0.jpg")
+        await send(embed=embed)
+    elif(rd == 64):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="세트")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sett_0.jpg")
+        await send(embed=embed)
+    elif(rd == 65):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="소나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sona_0.jpg")
+        await send(embed=embed)
+    elif(rd == 66):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="소라카")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Soraka_0.jpg")
+        await send(embed=embed)
+    elif(rd == 67):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="쉔")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Shen_0.jpg")
+        await send(embed=embed)
+    elif(rd == 68):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="쉬바나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Shyvana_0.jpg")
+        await send(embed=embed)
+    elif(rd == 69):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="스웨인")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Swain_0.jpg")
+        await send(embed=embed)
+    elif(rd == 70):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="스카너")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Skarner_0.jpg")
+        await send(embed=embed)
+    elif(rd == 71):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="시비르")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sivir_0.jpg")
+        await send(embed=embed)
+    elif(rd == 72):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="신 짜오")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/XinZhao_0.jpg")
+        await send(embed=embed)
+    elif(rd == 73):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="신드라")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Syndra_0.jpg")
+        await send(embed=embed)
+    elif(rd == 74):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="신지드")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Singed_0.jpg")
+        await send(embed=embed)
+    elif(rd == 75):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="쓰레쉬")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Thresh_0.jpg")
+        await send(embed=embed)
+    elif(rd == 76):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아리")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg")
+        await send(embed=embed)
+    elif(rd ==77):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아무무")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Amumu_0.jpg")
+        await send(embed=embed)
+    elif(rd == 78):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아우렐리온 솔")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/AurelionSol_0.jpg")
+        await send(embed=embed)
+    elif(rd == 79):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아이번")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ivern_0.jpg")
+        await send(embed=embed)
+    elif(rd == 80):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아지르")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Azir_0.jpg")
+        await send(embed=embed)
+    elif(rd == 81):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아칼리")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Akali_0.jpg")
+        await send(embed=embed)
+    elif(rd == 82):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아트록스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg")
+        await send(embed=embed)
+    elif(rd == 83):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아펠리오스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aphelios_0.jpg")
+        await send(embed=embed)
+    elif(rd == 84):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="알리스타")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Alistar_0.jpg")
+        await send(embed=embed)
+    elif(rd == 85):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="애니")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Annie_0.jpg")
+        await send(embed=embed)
+    elif(rd == 86):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="애니비아")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Anivia_0.jpg")
+        await send(embed=embed)
+    elif(rd == 87):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="애쉬")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ashe_0.jpg")
+        await send(embed=embed)
+    elif(rd == 88):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="야스오")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yasuo_0.jpg")
+        await send(embed=embed)
+    elif(rd == 89):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="에코")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ekko_0.jpg")
+        await send(embed=embed)
+    elif(rd == 90):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="엘리스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Elise_0.jpg")
+        await send(embed=embed)
+    elif(rd == 91):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="오공")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MonkeyKing_0.jpg")
+        await send(embed=embed)
+    elif(rd == 92):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="오른")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ornn_0.jpg")
+        await send(embed=embed)
+    elif(rd == 93):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="오리아나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Orianna_0.jpg")
+        await send(embed=embed)
+    elif(rd == 94):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="올라프")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Olaf_0.jpg")
+        await send(embed=embed)
+    elif(rd == 95):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="요네")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yone_0.jpg")
+        await send(embed=embed)
+    elif(rd == 96):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="요릭")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yorick_0.jpg")
+        await send(embed=embed)
+    elif(rd == 97):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="우디르")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Udyr_0.jpg")
+        await send(embed=embed)
+    elif(rd == 98):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="우르곳")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Urgot_0.jpg")
+        await send(embed=embed)
+    elif(rd == 99):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="워윅")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Warwick_0.jpg")
+        await send(embed=embed)
+    elif(rd == 100):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="유미")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yuumi_0.jpg")
+        await send(embed=embed)
+    elif(rd == 101):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="이렐리아")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Irelia_0.jpg")
+        await send(embed=embed)
+    elif(rd == 102):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="이블린")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Evelynn_0.jpg")
+        await send(embed=embed)
+    elif(rd == 103):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="이즈리얼")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ezreal_0.jpg")
+        await send(embed=embed)
+    elif(rd == 104):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="일라오이")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Illaoi_0.jpg")
+        await send(embed=embed)
+    elif(rd == 105):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="자르반 4세")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/JarvanIV_0.jpg")
+        await send(embed=embed)
+    elif(rd == 106):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="자야")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Xayah_0.jpg")
+        await send(embed=embed)
+    elif(rd == 107):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="자이라")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zyra_0.jpg")
+        await send(embed=embed)
+    elif(rd == 108):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="자크")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zac_0.jpg")
+        await send(embed=embed)
+    elif(rd == 109):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="잔나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Janna_0.jpg")
+        await send(embed=embed)
+    elif(rd == 110):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="잭스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jax_0.jpg")
+        await send(embed=embed)
+    elif(rd == 111):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="제드")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zed_0.jpg")
+        await send(embed=embed)
+    elif(rd == 112):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="제라스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Xerath_0.jpg")
+        await send(embed=embed)
+    elif(rd == 113):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="제이스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jayce_0.jpg")
+        await send(embed=embed)
+    elif(rd == 114):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="조이")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zoe_0.jpg")
+        await send(embed=embed)
+    elif(rd == 115):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="직스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ziggs_0.jpg")
+        await send(embed=embed)
+    elif(rd == 116):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="진")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jhin_0.jpg")
+        await send(embed=embed)
+    elif(rd == 117):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="질리언")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zilean_0.jpg")
+        await send(embed=embed)
+    elif(rd == 118):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="징크스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jinx_0.jpg")
+        await send(embed=embed)
+    elif(rd == 119):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="초가스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Chogath_0.jpg")
+        await send(embed=embed)
+    elif(rd == 120):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카르마")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Karma_0.jpg")
+        await send(embed=embed)
+    elif(rd == 121):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카밀")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Camille_0.jpg")
+        await send(embed=embed)
+    elif(rd == 122):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카사딘")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kassadin_0.jpg")
+        await send(embed=embed)
+    elif(rd == 123):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카서스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Karthus_0.jpg")
+        await send(embed=embed)
+    elif(rd == 124):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카시오페아")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Cassiopeia_0.jpg")
+        await send(embed=embed)
+    elif(rd == 125):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카이사")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kaisa_0.jpg")
+        await send(embed=embed)
+    elif(rd == 126):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카직스")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Khazix_0.jpg")
+        await send(embed=embed)
+    elif(rd == 127):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="카타리나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Katarina_0.jpg")
+        await send(embed=embed)
+    elif(rd == 128):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="칼리스타")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kalista_0.jpg")
+        await send(embed=embed)
+    elif(rd == 129):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="케넨")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kennen_0.jpg")
+        await send(embed=embed)
+    elif(rd == 130):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="케이틀린")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Caitlyn_0.jpg")
+        await send(embed=embed)
+    elif(rd == 131):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="케인")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kayn_0.jpg")
+        await send(embed=embed)
+    elif(rd == 132):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="케일")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kayle_0.jpg")
+        await send(embed=embed)
+    elif(rd == 133):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="코그모")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/KogMaw_0.jpg")
+        await send(embed=embed)
+    elif(rd == 134):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="코르키")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Corki_0.jpg")
+        await send(embed=embed)
+    elif(rd == 135):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="퀸")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Quinn_0.jpg")
+        await send(embed=embed)
+    elif(rd == 136):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="클레드")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kled_0.jpg")
+        await send(embed=embed)
+    elif(rd == 137):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="키아나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Qiyana_0.jpg")
+        await send(embed=embed)
+    elif(rd == 138):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="킨드레드")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kindred_0.jpg")
+        await send(embed=embed)
+    elif(rd == 139):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="타릭")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Taric_0.jpg")
+        await send(embed=embed)
+    elif(rd == 140):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="탈론")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Talon_0.jpg")
+        await send(embed=embed)
+    elif(rd == 141):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="탈리야")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Taliyah_0.jpg")
+        await send(embed=embed)
+    elif(rd == 142):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="탐 켄치")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/TahmKench_0.jpg")
+        await send(embed=embed)
+    elif(rd == 143):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="트런들")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Trundle_0.jpg")
+        await send(embed=embed)
+    elif(rd == 144):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="트리스타나")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Tristana_0.jpg")
+        await send(embed=embed)
+    elif(rd == 145):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="트린다미어(손잡이)")
+        embed.set_image(url= "https://cdn.discordapp.com/attachments/842219802096697347/842219866622001172/hand.PNG")
+        await send(embed=embed)
+    elif(rd == 146):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="트위스티드 페이트")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/TwistedFate_0.jpg")
+        await send(embed=embed)
+    elif(rd == 147):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="트위치")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Twitch_0.jpg")
+        await send(embed=embed)
+    elif(rd == 148):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="티모")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Teemo_0.jpg")
+        await send(embed=embed)
+    elif(rd == 149):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="파이크")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Pyke_0.jpg")
+        await send(embed=embed)
+    elif(rd == 150):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="판테온")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Pantheon_0.jpg")
+        await send(embed=embed)
+    elif(rd == 151):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="피들스틱")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Fiddlesticks_0.jpg")
+        await send(embed=embed)
+    elif(rd == 152):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="피오라")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Fiora_0.jpg")
+        await send(embed=embed)
+    elif(rd == 153):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="피즈")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Fizz_0.jpg")
+        await send(embed=embed)
+    elif(rd == 154):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="하이머딩거")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Heimerdinger_0.jpg")
+        await send(embed=embed)
+    elif(rd == 155):
+        embed = discord.Embed(
+            title="롤 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="헤카림")
+        embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Hecarim_0.jpg")
+        await send(embed=embed)     
     
+@client.command(name="레식랜덤")
+async def rainrd(ctx):
+    embed = discord.Embed(title="레인보우식스시즈 랜덤캐", color=0xc1cc)
+    embed.add_field(name="사용법", value="아래 이모티콘반응을 추가해주세요.", inline=False)
+    embed.add_field(name="⚔️", value="공격팀", inline=False)
+    embed.add_field(name="🛑", value="수비팀", inline=False)
+    rainbow = await ctx.send(embed=embed)
+    await rainbow.add_reaction("⚔️") #stun
+    await rainbow.add_reaction("🛑") #step
 
-    #롤 랜덤캐 노가다.
-    if (content.startswith('lolrd;')):
-        rd = random.randint(1,155)
-        if(rd == 1):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="가렌")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Garen_0.jpg")
-            await send(embed=embed)
-        elif(rd == 2): 
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="갈리오")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Galio_0.jpg")
-            await send(embed=embed)
-        elif(rd == 3):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="갱플랭크")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gangplank_0.jpg")
-            await send(embed=embed)
-        elif(rd == 4):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="그라가스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gragas_0.jpg")
-            await send(embed=embed)
-        elif(rd == 5):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="그레이브즈")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Graves_0.jpg")
-            await send(embed=embed)
-        elif(rd == 6):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="그웬")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gwen_0.jpg")
-            await send(embed=embed)
-        elif(rd == 7):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="나르")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Gnar_0.jpg")
-            await send(embed=embed)
-        elif(rd == 8):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="나미")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nami_0.jpg")
-            await send(embed=embed)
-        elif(rd == 9):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="나서스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nasus_0.jpg")
-            await send(embed=embed)
-        elif(rd == 10):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="노틸러스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nautilus_0.jpg")
-            await send(embed=embed)
-        elif(rd == 11):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="녹턴")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nocturne_0.jpg")
-            await send(embed=embed)
-        elif(rd == 12):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="누누와 윌럼프")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nunu_0.jpg")
-            await send(embed=embed)
-        elif(rd == 13):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="니달리")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nidalee_0.jpg")
-            await send(embed=embed)
-        elif(rd == 14):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="니코")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Neeko_0.jpg")
-            await send(embed=embed)
-        elif(rd == 15):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="다리우스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Darius_0.jpg")
-            await send(embed=embed)
-        elif(rd == 16):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="다이애나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Diana_0.jpg")
-            await send(embed=embed)
-        elif(rd == 17):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="드레이븐")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Draven_0.jpg")
-            await send(embed=embed)
-        elif(rd == 18):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="라이즈")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ryze_0.jpg")
-            await send(embed=embed)
-        elif(rd == 19):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="라칸")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rakan_0.jpg")
-            await send(embed=embed)
-        elif(rd == 20):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="람머스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rammus_0.jpg")
-            await send(embed=embed)
-        elif(rd == 21):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="럭스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lux_0.jpg")
-            await send(embed=embed)
-        elif(rd == 22):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="럼블")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rumble_0.jpg")
-            await send(embed=embed)
-        elif(rd == 23):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="레넥톤")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Renekton_0.jpg")
-            await send(embed=embed)
-        elif(rd == 24):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="레오나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Leona_0.jpg")
-            await send(embed=embed)
-        elif(rd == 25):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="렉사이")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/RekSai_0.jpg")
-            await send(embed=embed)
-        elif(rd == 26):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="렐")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rell_0.jpg")
-            await send(embed=embed)    
-        elif(rd == 27):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="렝가")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rengar_0.jpg")
-            await send(embed=embed)
-        elif(rd == 28):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="루시안")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lucian_0.jpg")
-            await send(embed=embed)
-        elif(rd == 29):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="룰루")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lulu_0.jpg")
-            await send(embed=embed)
-        elif(rd == 30):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="르블랑")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Leblanc_0.jpg")
-            await send(embed=embed)
-        elif(rd == 31):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="리신")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_0.jpg")
-            await send(embed=embed)
-        elif(rd == 32):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="리븐")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Riven_0.jpg")
-            await send(embed=embed)
-        elif(rd == 33):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="리산드라")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lissandra_0.jpg")
-            await send(embed=embed)
-        elif(rd == 34):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="릴리아")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lillia_0.jpg")
-            await send(embed=embed)
-        elif(rd == 35):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="마스터 이")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MasterYi_0.jpg")
-            await send(embed=embed)
-        elif(rd == 36):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="마오카이")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Maokai_0.jpg")
-            await send(embed=embed)
-        elif(rd == 37):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="말자하")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Malzahar_0.jpg")
-            await send(embed=embed)
-        elif(rd == 38):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="말파이트")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Malphite_0.jpg")
-            await send(embed=embed)
-        elif(rd == 39):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="모데카이저")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Mordekaiser_0.jpg")
-            await send(embed=embed)
-        elif(rd == 40):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="모르가나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Morgana_0.jpg")
-            await send(embed=embed)
-        elif(rd == 41):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="문도 박사")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/DrMundo_0.jpg")
-            await send(embed=embed)
-        elif(rd == 42):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="미스 포츈")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MissFortune_0.jpg")
-            await send(embed=embed)
-        elif(rd == 43):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="바드")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Bard_0.jpg")
-            await send(embed=embed)
-        elif(rd == 44):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="바루스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Varus_0.jpg")
-            await send(embed=embed)
-        elif(rd == 45):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="바이")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vi_0.jpg")
-            await send(embed=embed)
-        elif(rd == 46):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="베이가")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Veigar_0.jpg")
-            await send(embed=embed)
-        elif(rd == 47):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="베인")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vayne_0.jpg")
-            await send(embed=embed)
-        elif(rd == 48):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="벨코즈")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Velkoz_0.jpg")
-            await send(embed=embed)
-        elif(rd == 49):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="볼리베어")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Volibear_0.jpg")
-            await send(embed=embed)
-        elif(rd == 50):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="브라움")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Braum_0.jpg")
-            await send(embed=embed)
-        elif(rd == 51):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="브랜드")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Brand_0.jpg")
-            await send(embed=embed)
-        elif(rd == 52):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="블라디미르")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vladimir_0.jpg")
-            await send(embed=embed)
-        elif(rd == 53):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="블리츠크랭크")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Blitzcrank_0.jpg")
-            await send(embed=embed)
-        elif(rd == 54):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="비에고")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Viego_0.jpg")
-            await send(embed=embed)
-        elif(rd == 55):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="빅토르")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Viktor_0.jpg")
-            await send(embed=embed)
-        elif(rd == 56):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="뽀삐")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Poppy_0.jpg")
-            await send(embed=embed)
-        elif(rd == 57):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="사미라")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Samira_0.jpg")
-            await send(embed=embed)
-        elif(rd == 58):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="사이온")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sion_0.jpg")
-            await send(embed=embed)
-        elif(rd == 59):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="사일러스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sylas_0.jpg")
-            await send(embed=embed)
-        elif(rd == 60):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="샤코")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Shaco_0.jpg")
-            await send(embed=embed)
-        elif(rd == 61):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="세나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Senna_0.jpg")
-            await send(embed=embed)
-        elif(rd == 62):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="세라핀")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Seraphine_0.jpg")
-            await send(embed=embed)
-        elif(rd == 63):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="세주아니")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sejuani_0.jpg")
-            await send(embed=embed)
-        elif(rd == 64):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="세트")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sett_0.jpg")
-            await send(embed=embed)
-        elif(rd == 65):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="소나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sona_0.jpg")
-            await send(embed=embed)
-        elif(rd == 66):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="소라카")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Soraka_0.jpg")
-            await send(embed=embed)
-        elif(rd == 67):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="쉔")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Shen_0.jpg")
-            await send(embed=embed)
-        elif(rd == 68):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="쉬바나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Shyvana_0.jpg")
-            await send(embed=embed)
-        elif(rd == 69):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="스웨인")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Swain_0.jpg")
-            await send(embed=embed)
-        elif(rd == 70):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="스카너")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Skarner_0.jpg")
-            await send(embed=embed)
-        elif(rd == 71):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="시비르")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Sivir_0.jpg")
-            await send(embed=embed)
-        elif(rd == 72):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="신 짜오")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/XinZhao_0.jpg")
-            await send(embed=embed)
-        elif(rd == 73):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="신드라")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Syndra_0.jpg")
-            await send(embed=embed)
-        elif(rd == 74):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="신지드")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Singed_0.jpg")
-            await send(embed=embed)
-        elif(rd == 75):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="쓰레쉬")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Thresh_0.jpg")
-            await send(embed=embed)
-        elif(rd == 76):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아리")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg")
-            await send(embed=embed)
-        elif(rd ==77):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아무무")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Amumu_0.jpg")
-            await send(embed=embed)
-        elif(rd == 78):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아우렐리온 솔")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/AurelionSol_0.jpg")
-            await send(embed=embed)
-        elif(rd == 79):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아이번")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ivern_0.jpg")
-            await send(embed=embed)
-        elif(rd == 80):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아지르")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Azir_0.jpg")
-            await send(embed=embed)
-        elif(rd == 81):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아칼리")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Akali_0.jpg")
-            await send(embed=embed)
-        elif(rd == 82):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아트록스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg")
-            await send(embed=embed)
-        elif(rd == 83):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아펠리오스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aphelios_0.jpg")
-            await send(embed=embed)
-        elif(rd == 84):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="알리스타")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Alistar_0.jpg")
-            await send(embed=embed)
-        elif(rd == 85):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="애니")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Annie_0.jpg")
-            await send(embed=embed)
-        elif(rd == 86):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="애니비아")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Anivia_0.jpg")
-            await send(embed=embed)
-        elif(rd == 87):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="애쉬")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ashe_0.jpg")
-            await send(embed=embed)
-        elif(rd == 88):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="야스오")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yasuo_0.jpg")
-            await send(embed=embed)
-        elif(rd == 89):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="에코")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ekko_0.jpg")
-            await send(embed=embed)
-        elif(rd == 90):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="엘리스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Elise_0.jpg")
-            await send(embed=embed)
-        elif(rd == 91):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="오공")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MonkeyKing_0.jpg")
-            await send(embed=embed)
-        elif(rd == 92):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="오른")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ornn_0.jpg")
-            await send(embed=embed)
-        elif(rd == 93):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="오리아나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Orianna_0.jpg")
-            await send(embed=embed)
-        elif(rd == 94):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="올라프")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Olaf_0.jpg")
-            await send(embed=embed)
-        elif(rd == 95):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="요네")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yone_0.jpg")
-            await send(embed=embed)
-        elif(rd == 96):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="요릭")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yorick_0.jpg")
-            await send(embed=embed)
-        elif(rd == 97):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="우디르")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Udyr_0.jpg")
-            await send(embed=embed)
-        elif(rd == 98):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="우르곳")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Urgot_0.jpg")
-            await send(embed=embed)
-        elif(rd == 99):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="워윅")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Warwick_0.jpg")
-            await send(embed=embed)
-        elif(rd == 100):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="유미")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yuumi_0.jpg")
-            await send(embed=embed)
-        elif(rd == 101):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="이렐리아")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Irelia_0.jpg")
-            await send(embed=embed)
-        elif(rd == 102):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="이블린")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Evelynn_0.jpg")
-            await send(embed=embed)
-        elif(rd == 103):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="이즈리얼")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ezreal_0.jpg")
-            await send(embed=embed)
-        elif(rd == 104):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="일라오이")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Illaoi_0.jpg")
-            await send(embed=embed)
-        elif(rd == 105):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="자르반 4세")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/JarvanIV_0.jpg")
-            await send(embed=embed)
-        elif(rd == 106):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="자야")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Xayah_0.jpg")
-            await send(embed=embed)
-        elif(rd == 107):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="자이라")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zyra_0.jpg")
-            await send(embed=embed)
-        elif(rd == 108):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="자크")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zac_0.jpg")
-            await send(embed=embed)
-        elif(rd == 109):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="잔나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Janna_0.jpg")
-            await send(embed=embed)
-        elif(rd == 110):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="잭스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jax_0.jpg")
-            await send(embed=embed)
-        elif(rd == 111):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="제드")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zed_0.jpg")
-            await send(embed=embed)
-        elif(rd == 112):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="제라스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Xerath_0.jpg")
-            await send(embed=embed)
-        elif(rd == 113):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="제이스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jayce_0.jpg")
-            await send(embed=embed)
-        elif(rd == 114):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="조이")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zoe_0.jpg")
-            await send(embed=embed)
-        elif(rd == 115):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="직스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ziggs_0.jpg")
-            await send(embed=embed)
-        elif(rd == 116):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="진")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jhin_0.jpg")
-            await send(embed=embed)
-        elif(rd == 117):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="질리언")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zilean_0.jpg")
-            await send(embed=embed)
-        elif(rd == 118):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="징크스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jinx_0.jpg")
-            await send(embed=embed)
-        elif(rd == 119):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="초가스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Chogath_0.jpg")
-            await send(embed=embed)
-        elif(rd == 120):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카르마")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Karma_0.jpg")
-            await send(embed=embed)
-        elif(rd == 121):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카밀")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Camille_0.jpg")
-            await send(embed=embed)
-        elif(rd == 122):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카사딘")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kassadin_0.jpg")
-            await send(embed=embed)
-        elif(rd == 123):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카서스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Karthus_0.jpg")
-            await send(embed=embed)
-        elif(rd == 124):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카시오페아")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Cassiopeia_0.jpg")
-            await send(embed=embed)
-        elif(rd == 125):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카이사")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kaisa_0.jpg")
-            await send(embed=embed)
-        elif(rd == 126):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카직스")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Khazix_0.jpg")
-            await send(embed=embed)
-        elif(rd == 127):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="카타리나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Katarina_0.jpg")
-            await send(embed=embed)
-        elif(rd == 128):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="칼리스타")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kalista_0.jpg")
-            await send(embed=embed)
-        elif(rd == 129):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="케넨")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kennen_0.jpg")
-            await send(embed=embed)
-        elif(rd == 130):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="케이틀린")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Caitlyn_0.jpg")
-            await send(embed=embed)
-        elif(rd == 131):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="케인")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kayn_0.jpg")
-            await send(embed=embed)
-        elif(rd == 132):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="케일")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kayle_0.jpg")
-            await send(embed=embed)
-        elif(rd == 133):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="코그모")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/KogMaw_0.jpg")
-            await send(embed=embed)
-        elif(rd == 134):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="코르키")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Corki_0.jpg")
-            await send(embed=embed)
-        elif(rd == 135):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="퀸")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Quinn_0.jpg")
-            await send(embed=embed)
-        elif(rd == 136):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="클레드")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kled_0.jpg")
-            await send(embed=embed)
-        elif(rd == 137):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="키아나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Qiyana_0.jpg")
-            await send(embed=embed)
-        elif(rd == 138):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="킨드레드")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Kindred_0.jpg")
-            await send(embed=embed)
-        elif(rd == 139):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="타릭")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Taric_0.jpg")
-            await send(embed=embed)
-        elif(rd == 140):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="탈론")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Talon_0.jpg")
-            await send(embed=embed)
-        elif(rd == 141):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="탈리야")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Taliyah_0.jpg")
-            await send(embed=embed)
-        elif(rd == 142):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="탐 켄치")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/TahmKench_0.jpg")
-            await send(embed=embed)
-        elif(rd == 143):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="트런들")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Trundle_0.jpg")
-            await send(embed=embed)
-        elif(rd == 144):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="트리스타나")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Tristana_0.jpg")
-            await send(embed=embed)
-        elif(rd == 145):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="트린다미어(손잡이)")
-            embed.set_image(url= "https://cdn.discordapp.com/attachments/842219802096697347/842219866622001172/hand.PNG")
-            await send(embed=embed)
-        elif(rd == 146):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="트위스티드 페이트")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/TwistedFate_0.jpg")
-            await send(embed=embed)
-        elif(rd == 147):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="트위치")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Twitch_0.jpg")
-            await send(embed=embed)
-        elif(rd == 148):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="티모")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Teemo_0.jpg")
-            await send(embed=embed)
-        elif(rd == 149):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="파이크")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Pyke_0.jpg")
-            await send(embed=embed)
-        elif(rd == 150):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="판테온")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Pantheon_0.jpg")
-            await send(embed=embed)
-        elif(rd == 151):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="피들스틱")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Fiddlesticks_0.jpg")
-            await send(embed=embed)
-        elif(rd == 152):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="피오라")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Fiora_0.jpg")
-            await send(embed=embed)
-        elif(rd == 153):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="피즈")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Fizz_0.jpg")
-            await send(embed=embed)
-        elif(rd == 154):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="하이머딩거")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Heimerdinger_0.jpg")
-            await send(embed=embed)
-        elif(rd == 155):
-            embed = discord.Embed(
-                title="롤 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="헤카림")
-            embed.set_image(url= "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Hecarim_0.jpg")
-            await send(embed=embed)
-    
-    if (content.startswith("rainrd")):
-            embed = discord.Embed(title="레인보우식스 랜덤캐", color=0xc1cc)
-            embed.add_field(name="⚔️", value="공격팀", inline=False)
-            embed.add_field(name="🛑", value="수비팀", inline=False)
-            rainbow = await msg.channel.send(embed=embed)
-            await rainbow.add_reaction("⚔️") #stun
-            await rainbow.add_reaction("🛑") #step
-    
-    if(content.startswith("bsrd;")):
-        randbs = random.randint(1,28)
-        if(randbs == 1):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="재키")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270497035255808/jack.png")
-            await send(embed=embed)
-        elif(randbs == 2):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아야")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270392251973692/aya.png")
-            await send(embed=embed)
-        elif(randbs == 3):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="현우")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270479733751818/hyun.png")
-            await send(embed=embed)
-        elif(randbs == 4):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="매그너스")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270530588377108/mag.png")
-            await send(embed=embed)
-        elif(randbs == 5):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="피오라")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270546640371742/piora.png")
-            await send(embed=embed)
-        elif(randbs == 6):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="나딘")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270536919023626/nadin.png")
-            await send(embed=embed)
-        elif(randbs == 7):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="자히르")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270506019454986/jahir.png")
-            await send(embed=embed)
-        elif(randbs == 8):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="하트")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270463303483392/heart.png")
-            await send(embed=embed)
-        elif(randbs == 9):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아이솔")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270487387439104/isol.png")
-            await send(embed=embed)
-        elif(randbs == 10):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="리다이린")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270553599377418/redirin.png")
-            await send(embed=embed)
-        elif(randbs == 11):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="유키")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270376733835264/yuki.png")
-            await send(embed=embed)
-        elif(randbs == 12):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="혜진")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270472112701491/hyeajin.png")
-            await send(embed=embed)
-        elif(randbs == 13):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="쇼우")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270579985350656/shou.png")
-            await send(embed=embed)
-        elif(randbs == 14):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="시셀라")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270599556497419/sisella.png")
-            await send(embed=embed)
-        elif(randbs == 15):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="키아라")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270515334086736/kiara.png")
-            await send(embed=embed)
-        elif(randbs == 16):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아드리아나")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270443062034432/driana.png")
-            await send(embed=embed)
-        elif(randbs == 17):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="쇼이치")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270586255179807/showich.png")
-            await send(embed=embed)
-        elif(randbs == 18):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="실비아")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270593663762442/silvia.png")
-            await send(embed=embed)
-        elif(randbs == 19):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="엠마")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270453199274004/emma.png")
-            await send(embed=embed)
-        elif(randbs == 20):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="레녹스")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270523555577866/lenox.png")
-            await send(embed=embed)
-        elif(randbs == 21):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="로지")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270561190150144/rogi.png")
-            await send(embed=embed)
-        elif(randbs == 22):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="루크")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270572247646248/ruke.png")
-            await send(embed=embed)
-        elif(randbs == 23):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="캐시")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270421231206420/cash.png")
-            await send(embed=embed)
-        elif(randbs == 24):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="아델라")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270432810893362/della.png")
-            await send(embed=embed)
-        elif(randbs == 25):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="버니스")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270411298439168/burnis.png")
-            await send(embed=embed)
-        elif(randbs == 26):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="바바라")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270401128300594/babara.png")
-            await send(embed=embed)
-        elif(randbs == 27):
-            embed = discord.Embed(
+
+@client.command(name="블서랜덤")
+async def bsrd(ctx):
+    send = ctx.send   
+    randbs = random.randint(1,28)
+    if(randbs == 1):
+        embed = discord.Embed(
             title="블서 랜덤캐",
             colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="알렉스")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270383401861190/Alex.png")
-            await send(embed=embed)
-        elif(randbs == 28):
-            embed = discord.Embed(
-                title="블서 랜덤캐",
-                colour=0xc1cc
-            )
-            embed.add_field(name="추천",value="수아")
-            embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270606158463016/sua.png")
-            await send(embed=embed)
+        )
+        embed.add_field(name="추천",value="재키")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270497035255808/jack.png")
+        await send(embed=embed)
+    elif(randbs == 2):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아야")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270392251973692/aya.png")
+        await send(embed=embed)
+    elif(randbs == 3):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="현우")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270479733751818/hyun.png")
+        await send(embed=embed)
+    elif(randbs == 4):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="매그너스")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270530588377108/mag.png")
+        await send(embed=embed)
+    elif(randbs == 5):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="피오라")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270546640371742/piora.png")
+        await send(embed=embed)
+    elif(randbs == 6):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="나딘")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270536919023626/nadin.png")
+        await send(embed=embed)
+    elif(randbs == 7):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="자히르")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270506019454986/jahir.png")
+        await send(embed=embed)
+    elif(randbs == 8):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="하트")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270463303483392/heart.png")
+        await send(embed=embed)
+    elif(randbs == 9):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아이솔")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270487387439104/isol.png")
+        await send(embed=embed)
+    elif(randbs == 10):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="리다이린")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270553599377418/redirin.png")
+        await send(embed=embed)
+    elif(randbs == 11):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="유키")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270376733835264/yuki.png")
+        await send(embed=embed)
+    elif(randbs == 12):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="혜진")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270472112701491/hyeajin.png")
+        await send(embed=embed)
+    elif(randbs == 13):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="쇼우")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270579985350656/shou.png")
+        await send(embed=embed)
+    elif(randbs == 14):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="시셀라")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270599556497419/sisella.png")
+        await send(embed=embed)
+    elif(randbs == 15):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="키아라")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270515334086736/kiara.png")
+        await send(embed=embed)
+    elif(randbs == 16):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아드리아나")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270443062034432/driana.png")
+        await send(embed=embed)
+    elif(randbs == 17):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="쇼이치")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270586255179807/showich.png")
+        await send(embed=embed)
+    elif(randbs == 18):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="실비아")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270593663762442/silvia.png")
+        await send(embed=embed)
+    elif(randbs == 19):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="엠마")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270453199274004/emma.png")
+        await send(embed=embed)
+    elif(randbs == 20):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="레녹스")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270523555577866/lenox.png")
+        await send(embed=embed)
+    elif(randbs == 21):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="로지")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270561190150144/rogi.png")
+        await send(embed=embed)
+    elif(randbs == 22):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="루크")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270572247646248/ruke.png")
+        await send(embed=embed)
+    elif(randbs == 23):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="캐시")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270421231206420/cash.png")
+        await send(embed=embed)
+    elif(randbs == 24):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="아델라")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270432810893362/della.png")
+        await send(embed=embed)
+    elif(randbs == 25):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="버니스")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270411298439168/burnis.png")
+        await send(embed=embed)
+    elif(randbs == 26):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="바바라")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270401128300594/babara.png")
+        await send(embed=embed)
+    elif(randbs == 27):
+        embed = discord.Embed(
+        title="블서 랜덤캐",
+        colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="알렉스")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270383401861190/Alex.png")
+        await send(embed=embed)
+    elif(randbs == 28):
+        embed = discord.Embed(
+            title="블서 랜덤캐",
+            colour=0xc1cc
+        )
+        embed.add_field(name="추천",value="수아")
+        embed.set_image(url="https://cdn.discordapp.com/attachments/842270328717574144/842270606158463016/sua.png")
+        await send(embed=embed)
 
 @client.event
 async def on_reaction_add(reaction, user):
@@ -1555,7 +1914,7 @@ async def on_reaction_add(reaction, user):
     if str(reaction.emoji) == "⚔️":
         if(rdnum2 == 1):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="슬레지")
@@ -1563,7 +1922,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 2):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="대처")
@@ -1571,7 +1930,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 3):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="애쉬")
@@ -1579,7 +1938,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 4):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="써마이트")
@@ -1587,7 +1946,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 5):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="트위치")
@@ -1595,7 +1954,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 6):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="몽타뉴")
@@ -1603,7 +1962,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 7):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="글라즈")
@@ -1611,7 +1970,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 8):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="퓨즈")
@@ -1619,7 +1978,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 9):
             embed = discord.Embed(
-            title="레식 랜덤캐",
+            title="레식 공격 랜덤캐",
             colour=0xc1cc
         )
             embed.add_field(name="추천",value="블리츠")
@@ -1627,7 +1986,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 10):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="아이큐")
@@ -1635,7 +1994,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 11):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="벅")
@@ -1643,7 +2002,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 12):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="블랙비어드")
@@ -1651,7 +2010,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 13):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="카피탕")
@@ -1659,7 +2018,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 14):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="히바나")
@@ -1667,7 +2026,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 15):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="자칼")
@@ -1675,7 +2034,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 16):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="잉")
@@ -1683,7 +2042,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 17):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="조피아")
@@ -1691,7 +2050,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 18):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="도깨비")
@@ -1699,7 +2058,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 19):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="라이온")
@@ -1707,7 +2066,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 20):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="핀카")
@@ -1715,7 +2074,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 21):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="매버릭")
@@ -1723,7 +2082,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 22):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="노매드")
@@ -1731,7 +2090,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 23):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="그리드락")
@@ -1739,7 +2098,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 24):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="뇌크")
@@ -1747,7 +2106,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 25):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="아마루")
@@ -1755,7 +2114,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 26):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="칼리")
@@ -1763,7 +2122,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 27):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="야나")
@@ -1771,7 +2130,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 28):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="에이스")
@@ -1779,7 +2138,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 29):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="제로")
@@ -1787,7 +2146,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum2 == 30):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 공격 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="플로레스")
@@ -1796,7 +2155,7 @@ async def on_reaction_add(reaction, user):
     if str(reaction.emoji) == "🛑":
         if(rdnum == 1):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="스모크")
@@ -1804,7 +2163,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 2):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="뮤트")
@@ -1812,7 +2171,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 3):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="캐슬")
@@ -1820,7 +2179,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 4):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="펄스")
@@ -1828,7 +2187,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 5):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="닥")
@@ -1836,7 +2195,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 6):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="룩")
@@ -1844,7 +2203,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 7):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="캅칸")
@@ -1852,7 +2211,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 8):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="타찬카")
@@ -1860,7 +2219,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 9):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="예거")
@@ -1868,7 +2227,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 10):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="밴딧")
@@ -1876,7 +2235,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 11):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="프로스트")
@@ -1884,7 +2243,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 12):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="발키리")
@@ -1892,7 +2251,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 13):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="카베이라")
@@ -1900,7 +2259,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 14):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="에코")
@@ -1908,7 +2267,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 15):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="미라")
@@ -1916,7 +2275,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 16):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="리전")
@@ -1924,7 +2283,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 17):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="엘라")
@@ -1932,7 +2291,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 18):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="비질")
@@ -1940,7 +2299,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 19):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="마에스트로")
@@ -1948,7 +2307,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 20):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="알리바이")
@@ -1956,7 +2315,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 21):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="클래시")
@@ -1964,7 +2323,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 22):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="카이드")
@@ -1972,7 +2331,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 23):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="모찌")
@@ -1980,7 +2339,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 24):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="워든")
@@ -1988,7 +2347,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 25):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="고요")
@@ -1996,7 +2355,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 26):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="와마이")
@@ -2004,7 +2363,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 27):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="오릭스")
@@ -2012,7 +2371,7 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 28):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="멜루시")
@@ -2020,16 +2379,21 @@ async def on_reaction_add(reaction, user):
             await reaction.message.channel.send(embed=embed)
         elif(rdnum == 29):
             embed = discord.Embed(
-                title="레식 랜덤캐",
+                title="레식 수비 랜덤캐",
                 colour=0xc1cc
             )
             embed.add_field(name="추천",value="아루니")
             embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/842219802096697347/842227716166254662/aruni.png")
             await reaction.message.channel.send(embed=embed)
 
-    
+@client.command(name="한강")
+async def _hangang(ctx):
+    await ctx.send("현재 한강 온도는" + str(hangang.getTemp()) + "℃ 입니다.")
 
-        
+@client.event
+async def on_command_error(ctx, error):
+    await ctx.send("알 수 없는 명령어를 사용하셨습니다.")
+    pass
 
 
 
