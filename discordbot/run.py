@@ -15,7 +15,7 @@ from requests.sessions import Request
 from discord.ext.commands.core import command
 import hangang
 
-token = "ODIzODIzMjc1MzUxOTk4NTI0.YFmbNg.pNTzTpOaCiJPtAjXP3VR8DNbBdA"
+token = ""
 
 client = commands.Bot(command_prefix='.')
 
